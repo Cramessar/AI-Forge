@@ -41,7 +41,7 @@ Basically, it’s like ChatGPT met a local dev tool, drank some Red Bull, and de
 
 ```bash
 # Clone the repo
-git clone https://github.com/yourname/ai-forge.git
+git clone https://github.com/cramessar/ai-forge.git
 cd ai-forge
 
 # Install dependencies
