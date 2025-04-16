@@ -1,0 +1,17 @@
+{
+  "default_model": {
+    "type": "ollama",
+    "model_name": "mistral:latest"
+  },
+  "generation": {
+    "temperature": 0.7,
+    "max_tokens": 512
+  },
+  "performance": {
+    "backend": "auto",
+    "last_benchmark": {
+      "cpu": 2.53,
+      "gpu": 1.14
+    }
+  }
+}
