@@ -9,11 +9,11 @@ venv/
 env/
 ENV/
 
-# VSCode and JetBrains IDE configs (optional)
+# VSCode and JetBrains IDE configs
 .vscode/
 .idea/
 
-# macOS + Windows cruft (optional but good hygiene)
+# macOS + Windows cruft
 .DS_Store
 Thumbs.db
 
@@ -24,8 +24,8 @@ dist/
 
 # Logs or temp files
 *.log
-*.sqlite3
 .history.json
+history.db
 
-# Ollama models (if they cache anything in project dir)
+# Ollama models (if applicable)
 ollama_model_cache/
