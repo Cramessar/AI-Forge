@@ -1,6 +1,6 @@
 {
   "default_model": {
-    "model_name": "mistral:latest",
+    "model_name": "gemma3:27b",
     "type": "ollama"
   },
   "generation": {
@@ -8,10 +8,10 @@
     "max_tokens": 512
   },
   "performance": {
-    "backend": "cpu",
+    "backend": "auto",
     "last_benchmark": {
-      "cpu": null,
-      "gpu": null
+      "cpu": 6.0,
+      "gpu": 4.34
     }
   }
 }
