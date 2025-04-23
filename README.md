@@ -177,8 +177,12 @@ Now go forth and generate something epic.
 — _Chris_
 
 
+## 🚀 V2 Improvements (April 2025)
 
-## 🚀 V2 Improvements
+<details>
+<summary><strong>Click to expand V2 features and enhancements</strong></summary>
+
+<br>
 
 Version 2 of **AI Forge** comes loaded with next-gen features designed to give both power users and tinkerers a serious upgrade in control, flexibility, and performance:
 
@@ -217,4 +221,7 @@ Version 2 of **AI Forge** comes loaded with next-gen features designed to give b
 ---
 
 > Want to contribute a new model or template? Add it to the project and update the docs — we welcome upgrades from fellow Forge-smiths.
- P.S the "we" is the voices in my head...just kidding its the feedback I get from my wife
+
+P.S. the "we" is the voices in my head... just kidding, it's the feedback I get from my wife ❤️
+
+</details>
