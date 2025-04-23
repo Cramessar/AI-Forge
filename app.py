@@ -1,25 +1,41 @@
 import sys
 import json
 import re
-
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
-    QLabel, QComboBox, QFileDialog, QMessageBox, QListWidget, QSizePolicy, QDialog,
-    QSpinBox, QTabWidget
+    QApplication,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTextEdit,
+    QPushButton,
+    QLabel,
+    QComboBox,
+    QFileDialog,
+    QMessageBox,
+    QListWidget,
+    QSizePolicy,
+    QDialog,
+    QSpinBox,
+    QTabWidget,
+    QListWidgetItem,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 import webbrowser
 from model_loader import ModelLoader
 import markdown2
-
 from pygments import highlight
 from pygments.lexers import guess_lexer, get_lexer_by_name
 from pygments.formatters import HtmlFormatter
-
 from PyQt6.QtWebEngineCore import QWebEnginePage
 from db import init_db
+from hardware_profile import get_system_profile, get_tuned_generation_settings
+from prompt_tools import load_templates, apply_template, chain_prompts, update_template_selector_state, load_prompt_template, save_prompt_template, chain_prompts
+from local_hf_runner import HFRunner, HF_MODEL_MAP
+
+
+
 
 
 class ExternalLinkPage(QWebEnginePage):
@@ -47,7 +63,9 @@ class GenerationThread(QThread):
                     self.result_ready.emit(chunk)
                 self.finished.emit(self.prompt)
             else:
-                self.result_ready.emit("[Streaming only supported for Ollama right now]")
+                self.result_ready.emit(
+                    "[Streaming only supported for Ollama right now]"
+                )
                 self.finished.emit(self.prompt)
         except Exception as e:
             self.result_ready.emit(f"[Error] {str(e)}")
@@ -72,11 +90,15 @@ class SettingsDialog(QDialog):
         performance_layout = QVBoxLayout()
 
         backend_label = QLabel("Execution Backend")
-        backend_label.setToolTip("Select CPU, GPU, or let the app decide automatically.")
+        backend_label.setToolTip(
+            "Select CPU, GPU, or let the app decide automatically."
+        )
 
         self.backend_selector = QComboBox()
         self.backend_selector.addItems(["auto", "cpu", "gpu"])
-        self.backend_selector.setCurrentText(self.config.get("performance", {}).get("backend", "auto"))
+        self.backend_selector.setCurrentText(
+            self.config.get("performance", {}).get("backend", "auto")
+        )
 
         performance_layout.addWidget(backend_label)
         performance_layout.addWidget(self.backend_selector)
@@ -88,7 +110,9 @@ class SettingsDialog(QDialog):
         last_benchmark = self.config.get("performance", {}).get("last_benchmark", {})
         cpu_time = last_benchmark.get("cpu", "Not run")
         gpu_time = last_benchmark.get("gpu", "Not run")
-        self.benchmark_result = QLabel(f"Last CPU: {cpu_time} sec | GPU: {gpu_time} sec")
+        self.benchmark_result = QLabel(
+            f"Last CPU: {cpu_time} sec | GPU: {gpu_time} sec"
+        )
         performance_layout.addWidget(self.benchmark_result)
 
         performance_tab.setLayout(performance_layout)
@@ -97,17 +121,23 @@ class SettingsDialog(QDialog):
         # temp settings
         temp_row = QHBoxLayout()
         temp_label = QLabel("Temperature")
-        temp_label.setToolTip("Controls randomness. Lower = more focused, higher = more creative.")
+        temp_label.setToolTip(
+            "Controls randomness. Lower = more focused, higher = more creative."
+        )
         self.temp_box = QSpinBox()
         self.temp_box.setRange(0, 100)
-        self.temp_box.setValue(int(config.get("generation", {}).get("temperature", 0.7) * 100))
+        self.temp_box.setValue(
+            int(config.get("generation", {}).get("temperature", 0.7) * 100)
+        )
         temp_row.addWidget(temp_label)
         temp_row.addWidget(self.temp_box)
 
         # token settings
         token_row = QHBoxLayout()
         token_label = QLabel("Max Tokens")
-        token_label.setToolTip("Maximum number of tokens (words/pieces) the model can generate.")
+        token_label.setToolTip(
+            "Maximum number of tokens (words/pieces) the model can generate."
+        )
         self.token_box = QSpinBox()
         self.token_box.setRange(32, 2048)
         self.token_box.setValue(config.get("generation", {}).get("max_tokens", 512))
@@ -140,12 +170,14 @@ class SettingsDialog(QDialog):
         self.config.setdefault("performance", {})
         self.config["performance"]["backend"] = self.backend_selector.currentText()
         self.accept()
-        
+
     def reset_to_defaults(self):
-        self.temp_box.setValue(70)    # default 0.7
+        self.temp_box.setValue(70)  # default 0.7
         self.token_box.setValue(512)  # default 512 tokens
-        QMessageBox.information(self, "Settings Reset", "Settings have been reset to their default values.")
-        
+        QMessageBox.information(
+            self, "Settings Reset", "Settings have been reset to their default values."
+        )
+
     def run_benchmark(self):
         sample_prompt = "Tell me a fantasy story about a lost sword in a cursed forest."
 
@@ -154,6 +186,7 @@ class SettingsDialog(QDialog):
         QApplication.processEvents()
 
         from model_loader import ModelLoader
+
         loader = ModelLoader()
         times = loader.run_performance_test()
 
@@ -177,22 +210,35 @@ class SettingsDialog(QDialog):
             f"Benchmark complete.\n\n"
             f"CPU: {cpu_time} sec\nGPU: {gpu_time} sec\n\n"
             f"Use {best.upper()} for best performance?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             self.config["performance"]["backend"] = best
-            QMessageBox.information(self, "Backend Set", f"Processing will now use {best.upper()}.\nThis will be saved.")
+            from hardware_profile import get_system_profile, get_tuned_generation_settings
+            profile = get_system_profile()
+            recommended = get_tuned_generation_settings(profile)
+            self.config.setdefault("generation", {})
+            self.config["generation"]["temperature"] = recommended["temperature"]
+            self.config["generation"]["max_tokens"] = recommended["max_tokens"]
+            if hasattr(self.parent(), "model_loader"):
+                self.parent().model_loader.config["generation"]["temperature"] = recommended["temperature"]
+                self.parent().model_loader.config["generation"]["max_tokens"] = recommended["max_tokens"]
+            
+            self.temp_box.setValue(int(recommended["temperature"] * 100))
+            self.token_box.setValue(recommended["max_tokens"])
 
+            QMessageBox.information(
+                self,
+                "Backend & Settings Applied",
+                f"Processing will now use {best.upper()}.\n"
+                f"Settings updated: Temperature = {recommended['temperature']}, Max Tokens = {recommended['max_tokens']}"
+            )
             loader.config = self.config
             loader.save_config()
-
             if hasattr(self.parent(), "update_model_display"):
                 model_name = self.config.get("default_model", {}).get("model_name", "Unknown")
                 self.parent().update_model_display(model_name)
-        else:
-            QMessageBox.information(self, "No Change", "Performance setting unchanged.")
-
         self.benchmark_button.setEnabled(True)
         self.benchmark_button.setText("Run Benchmark")
 
@@ -205,13 +251,26 @@ class AIForgeUI(QWidget):
         self.setMinimumSize(1000, 700)
         self.model_loader = ModelLoader()
         self.model_loader.load_model()
-        self.backend_used = self.model_loader.config["performance"].get("backend", "cpu")
+        self.hf_runner = HFRunner()
+        self.backend_used = self.model_loader.config["performance"].get(
+            "backend", "cpu"
+        )
+        profile = get_system_profile()
+        recommended = get_tuned_generation_settings(profile)
+        self.model_loader.config.setdefault("generation", {})
+        self.model_loader.config["generation"]["temperature"] = recommended[
+            "temperature"
+        ]
+        self.model_loader.config["generation"]["max_tokens"] = recommended["max_tokens"]
+        self.model_loader.save_config()
         self.history = []
         self.ui_color = self.model_loader.config.get("ui_color", "#009EEB")
         self.init_ui()
         self.apply_theme_color()
 
     def init_ui(self):
+        from local_hf_runner import HF_MODEL_MAP  # ensures HF models are accessible
+
         main_layout = QHBoxLayout()
         self.toggle_sidebar_button = QPushButton()
         self.toggle_sidebar_button.clicked.connect(self.toggle_sidebar)
@@ -223,11 +282,13 @@ class AIForgeUI(QWidget):
 
         # Model selector
         self.model_selector = QComboBox()
-        models = self.model_loader.list_ollama_models()
-        self.model_selector.addItems(models)
+        ollama_models = self.model_loader.list_ollama_models()
+        hf_models = list(HF_MODEL_MAP.keys())
+        all_models = ollama_models + hf_models
+        self.model_selector.addItems(all_models)
 
         current = self.model_loader.config["default_model"].get("model_name")
-        if current in models:
+        if current in all_models:
             self.model_selector.setCurrentText(current)
         else:
             self.model_selector.setCurrentIndex(0)
@@ -236,7 +297,7 @@ class AIForgeUI(QWidget):
         self.sidebar.addWidget(self.model_selector)
         self.model_selector.currentTextChanged.connect(self.on_model_changed)
 
-        # sidebar buttons
+        # Sidebar buttons
         self.settings_button = QPushButton("🛠️ Settings")
         self.settings_button.clicked.connect(self.open_settings)
         self.sidebar.addWidget(self.settings_button)
@@ -253,9 +314,45 @@ class AIForgeUI(QWidget):
         self.import_button.clicked.connect(self.import_content)
         self.sidebar.addWidget(self.import_button)
 
+        self.sidebar.addSpacing(10)
+
+        # Prompt Template
+        self.template_selector = QComboBox()
+        self.templates = load_templates()
+        self.template_selector.addItem("None")
+        self.template_selector.addItems(self.templates.keys())
+        self.template_selector.currentTextChanged.connect(self.on_template_selected)
+        self.sidebar.addWidget(QLabel("🧩 Prompt Template"))
+        self.sidebar.addWidget(self.template_selector)
+
+        self.save_template_button = QPushButton("💾 Save as Template")
+        self.save_template_button.clicked.connect(self.save_prompt_as_template)
+        self.sidebar.addWidget(self.save_template_button)
+
+        self.delete_template_button = QPushButton("🗑️ Delete Template")
+        self.delete_template_button.clicked.connect(self.delete_selected_template)
+        self.sidebar.addWidget(self.delete_template_button)
+
+        self.sidebar.addSpacing(10)
+
+        # Prompt Chaining
+        self.chain_list = QListWidget()
+        self.chain_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.chain_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        for name in self.templates.keys():
+            item = QListWidgetItem(name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.chain_list.addItem(item)
+        self.chain_list.itemChanged.connect(self.update_template_selector_state)
+        self.load_chain_state()
+
+        self.sidebar.addWidget(QLabel("🔗 Chain Prompts"))
+        self.sidebar.addWidget(self.chain_list)
+
         self.sidebar.addStretch()
 
-        # history
+        # History
         self.history_list = QListWidget()
         self.history_list.setMaximumWidth(250)
         self.history_list.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
@@ -263,13 +360,13 @@ class AIForgeUI(QWidget):
         self.sidebar.addWidget(QLabel("📚 History"))
         self.sidebar.addWidget(self.history_list)
 
-        # sidebar container
+        # Sidebar container
         self.sidebar_widget = QWidget()
         self.sidebar_widget.setLayout(self.sidebar)
         self.toggle_sidebar_button.setText("Close" if self.sidebar_widget.isVisible() else "Close")
         main_layout.addWidget(self.sidebar_widget)
 
-        # output box
+        # Output box
         self.output_box = QWebEngineView()
         self.output_box.setPage(ExternalLinkPage(self.output_box))
         content_area.addWidget(self.output_box, 5)
@@ -299,36 +396,27 @@ class AIForgeUI(QWidget):
             </html>
         """)
 
-        # buttons row
+        # Buttons row
         button_row = QHBoxLayout()
         self.clear_button = QPushButton("🧹 Clear")
         self.clear_button.clicked.connect(self.clear_output)
         button_row.addWidget(self.clear_button)
-
         self.copy_button = QPushButton("📋 Copy Output")
         self.copy_button.clicked.connect(self.copy_output)
         button_row.addWidget(self.copy_button)
-
         self.regenerate_button = QPushButton("🔁 Regenerate")
         self.regenerate_button.clicked.connect(self.regenerate_last)
         button_row.addWidget(self.regenerate_button)
-
         button_row.addStretch()
-
         self.model_display = QLabel()
         self.update_model_display(current)
         button_row.addWidget(self.model_display)
-
         content_area.addLayout(button_row)
-
-        # prompt input
         self.prompt_input = QTextEdit()
         self.prompt_input.setPlaceholderText("Enter your prompt here...")
         self.prompt_input.setAcceptRichText(False)
         self.prompt_input.installEventFilter(self)
         content_area.addWidget(self.prompt_input, 2)
-
-        # generate button
         self.generate_button = QPushButton("Generate")
         self.generate_button.setObjectName("GenerateButton")
         self.generate_button.clicked.connect(self.handle_generate)
@@ -337,8 +425,21 @@ class AIForgeUI(QWidget):
         main_layout.addLayout(content_area)
         self.setLayout(main_layout)
 
+
+    def update_template_selector_state(self):
+        """
+        Disable the single-template dropdown if any chained templates are selected.
+        """
+        any_checked = any(
+            self.chain_list.item(i).checkState() == Qt.CheckState.Checked
+            for i in range(self.chain_list.count())
+        )
+        self.template_selector.setEnabled(not any_checked)
+
+
     def apply_theme_color(self):
-        self.setStyleSheet("""
+        self.setStyleSheet(
+            """
             QWidget {
                 background-color: #1a1a2e;
                 color: #FF5BFF;
@@ -379,15 +480,16 @@ class AIForgeUI(QWidget):
                 font-size: 16px;
                 font-weight: bold;
             }
-        """)
+        """
+        )
 
     def on_model_changed(self, new_model):
         current_model = self.model_loader.config["default_model"].get("model_name")
-        
+
         if new_model != current_model:
             self.model_loader.config["default_model"]["model_name"] = new_model
             self.model_loader.save_config()
-        
+
         self.update_model_display(new_model)
 
     def toggle_sidebar(self):
@@ -411,42 +513,156 @@ class AIForgeUI(QWidget):
             self.model_loader.save_config()
             self.apply_theme_color()
 
+
+    def save_prompt_as_template(self):
+        from PyQt6.QtWidgets import QInputDialog
+        from prompt_tools import save_prompt_template
+
+        prompt_text = self.prompt_input.toPlainText().strip()
+        if not prompt_text:
+            QMessageBox.warning(self, "Empty Prompt", "There is no prompt to save as a template.")
+            return
+
+        name, ok = QInputDialog.getText(self, "Save Template", "Enter a name for this template:")
+        if ok and name:
+            try:
+                save_prompt_template(name, prompt_text)
+                self.templates = load_templates()
+                self.template_selector.clear()
+                self.template_selector.addItem("None")
+                self.template_selector.addItems(self.templates.keys())
+                QMessageBox.information(self, "Template Saved", f"'{name}' saved successfully!")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Could not save template:\n{str(e)}")
+    
+    def on_template_selected(self, template_name: str):
+        if template_name and template_name != "None":
+            template = self.templates.get(template_name)
+            if template:
+                preview = template.replace("{{input}}", "[your input here]").replace("{{previous}}", "[previous output]")
+                self.prompt_input.setPlainText(preview)
+        else:
+            self.prompt_input.clear()
+            
+    def delete_selected_template(self):
+        selected = self.template_selector.currentText()
+        if selected == "None":
+            QMessageBox.information(self, "Delete Template", "Please select a template to delete.")
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            f"Are you sure you want to delete the template '{selected}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        if confirm == QMessageBox.StandardButton.Yes:
+            from prompt_tools import delete_prompt_template
+            delete_prompt_template(selected)
+            self.templates = load_templates()
+            self.template_selector.clear()
+            self.template_selector.addItem("None")
+            self.template_selector.addItems(self.templates.keys())
+            self.prompt_input.clear()
+            QMessageBox.information(self, "Template Deleted", f"'{selected}' has been removed.")
+
+
+
     def handle_generate(self):
         prompt = self.prompt_input.toPlainText().strip()
+
         if not prompt:
             QMessageBox.warning(self, "Missing Prompt", "Please enter a prompt before generating.")
             return
+
+        # Handle chaining first — takes precedence over single template
+        chain_templates = []
+        for i in range(self.chain_list.count()):
+            item = self.chain_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                chain_templates.append(item.text())
+
+        if chain_templates:
+            prompt = chain_prompts(chain_templates, prompt, self.model_loader)
+        else:
+            selected_template = self.template_selector.currentText()
+            if selected_template != "None" and selected_template in self.templates:
+                prompt = apply_template(self.templates[selected_template], prompt)
 
         self.generate_button.setEnabled(False)
         self.output_box.repaint()
 
         dropdown_model = self.model_selector.currentText()
-        configured_model = self.model_loader.config["default_model"].get("model_name")
 
+        from local_hf_runner import HF_MODEL_MAP  # centralized mapping of HF models
+
+        if dropdown_model in HF_MODEL_MAP:
+            # Use Hugging Face model
+            self.model_loader.config["default_model"]["type"] = "huggingface"
+            self.model_loader.config["default_model"]["model_name"] = HF_MODEL_MAP[dropdown_model]
+            self.model_loader.save_config()
+
+            self.hf_runner = HFRunner(HF_MODEL_MAP[dropdown_model])
+            result = self.hf_runner.generate(prompt)
+            self.display_result(prompt, result)
+            return
+
+        # Otherwise, Ollama model
+        configured_model = self.model_loader.config["default_model"].get("model_name")
         if dropdown_model != configured_model:
             self.model_loader.config["default_model"]["model_name"] = dropdown_model
+            self.model_loader.config["default_model"]["type"] = "ollama"
             self.model_loader.save_config()
             configured_model = dropdown_model
 
         self.update_model_display(configured_model)
 
+        # Start generation thread (Ollama)
         self.generated_text = ""
         self.thread = GenerationThread(self.model_loader, prompt)
         self.thread.result_ready.connect(self.append_stream_chunk)
         self.thread.finished.connect(self.finish_stream)
         self.thread.start()
 
+
+
+    def preview_chained_prompt(self):
+        user_input = self.prompt_input.toPlainText().strip()
+        if not user_input:
+            QMessageBox.information(self, "Empty Input", "Enter a prompt before previewing.")
+            return
+
+        chain_templates = [
+            self.chain_list.item(i).text()
+            for i in range(self.chain_list.count())
+            if self.chain_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+        if not chain_templates:
+            QMessageBox.information(self, "No Templates", "No templates selected for chaining.")
+            return
+
+        try:
+            preview = chain_prompts(chain_templates, user_input)
+            QMessageBox.information(self, "Chain Preview", f"Resulting chained prompt:\n\n{preview}")
+        except ValueError as e:
+            QMessageBox.warning(self, "Chain Error", str(e))
+
+
     def append_stream_chunk(self, chunk):
         self.generated_text += chunk
 
     def finish_stream(self, prompt):
         self.display_result(prompt, self.generated_text)
-        
+
     def display_result(self, prompt: str, result: str):
         from PyQt6.QtCore import QUrl
         from pygments.formatters import HtmlFormatter
         from db import get_connection
-        raw_html = markdown2.markdown(result, extras=["fenced-code-blocks", "break-on-newline", "code-friendly"])
+
+        raw_html = markdown2.markdown(
+            result, extras=["fenced-code-blocks", "break-on-newline", "code-friendly"]
+        )
 
         # highlight code blocks
         highlighted = self.highlight_code_blocks(raw_html)
@@ -493,19 +709,23 @@ class AIForgeUI(QWidget):
         </body>
         </html>
         """
-        
+
         self.output_box.setHtml(html, baseUrl=QUrl("about:blank"))
         self.history.append((prompt, result))
         self.history_list.addItem(prompt[:40] + "...")
 
-        #SQLite DB
+        # SQLite DB
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO history (prompt, response) VALUES (?, ?)", (prompt, result))
+            cursor.execute(
+                "INSERT INTO history (prompt, response) VALUES (?, ?)", (prompt, result)
+            )
             conn.commit()
 
         self.generate_button.setEnabled(True)
-        self.output_box.page().runJavaScript("window.scrollTo(0, document.body.scrollHeight);")
+        self.output_box.page().runJavaScript(
+            "window.scrollTo(0, document.body.scrollHeight);"
+        )
 
     def update_model_display(self, model_name):
         backend = self.model_loader.config["performance"].get("backend", "cpu")
@@ -534,31 +754,63 @@ class AIForgeUI(QWidget):
             self.handle_generate()
 
     def save_session(self):
-        file_path = QFileDialog.getSaveFileName(self, "Save Session", "session.json", "JSON Files (*.json)")[0]
+        file_path = QFileDialog.getSaveFileName(
+            self, "Save Session", "session.json", "JSON Files (*.json)"
+        )[0]
         if file_path:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(self.history, f, indent=2)
             QMessageBox.information(self, "Saved", "Session saved successfully.")
 
     def load_session(self):
-        file_path = QFileDialog.getOpenFileName(self, "Load Session", "", "JSON Files (*.json)")[0]
+        file_path = QFileDialog.getOpenFileName(
+            self, "Load Session", "", "JSON Files (*.json)"
+        )[0]
         if file_path:
             with open(file_path, "r", encoding="utf-8") as f:
                 self.history = json.load(f)
             self.history_list.clear()
             self.output_box.clear()
             for prompt, response in self.history:
-                html = markdown2.markdown(response, extras=["fenced-code-blocks", "break-on-newline"])
+                html = markdown2.markdown(
+                    response, extras=["fenced-code-blocks", "break-on-newline"]
+                )
                 self.display_result(prompt, response)
                 self.history_list.addItem(prompt[:40] + "...")
             QMessageBox.information(self, "Loaded", "Session loaded successfully.")
             
+    def save_chain_state(self):
+        """Save the current chain prompt selection and order."""
+        state = []
+        for i in range(self.chain_list.count()):
+            item = self.chain_list.item(i)
+            state.append({
+                "name": item.text(),
+                "checked": item.checkState() == Qt.CheckState.Checked
+            })
+        with open("chain_state.json", "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+
+    def load_chain_state(self):
+        """Load the saved chain prompt selection and order."""
+        try:
+            with open("chain_state.json", "r", encoding="utf-8") as f:
+                state = json.load(f)
+            self.chain_list.clear()
+            for entry in state:
+                item = QListWidgetItem(entry["name"])
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Checked if entry["checked"] else Qt.CheckState.Unchecked)
+                self.chain_list.addItem(item)
+        except FileNotFoundError:
+            pass  
+
     def import_content(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Import Content",
             "",
-            "Supported Files (*.txt *.md *.markdown *.pdf);;All Files (*)"
+            "Supported Files (*.txt *.md *.markdown *.pdf);;All Files (*)",
         )
         if not file_path:
             return
@@ -569,20 +821,26 @@ class AIForgeUI(QWidget):
                     content = f.read()
             elif file_path.endswith(".pdf"):
                 import fitz  # PyMuPDF
+
                 doc = fitz.open(file_path)
                 content = "\n\n".join(page.get_text() for page in doc)
             else:
-                QMessageBox.warning(self, "Unsupported Format", "This file type is not currently supported.")
+                QMessageBox.warning(
+                    self,
+                    "Unsupported Format",
+                    "This file type is not currently supported.",
+                )
                 return
-            
+
             existing = self.prompt_input.toPlainText()
             self.prompt_input.setPlainText(existing + "\n\n" + content)
 
             QMessageBox.information(self, "Import Successful", f"Imported: {file_path}")
 
         except Exception as e:
-            QMessageBox.critical(self, "Import Failed", f"Error reading file:\n{str(e)}")
-
+            QMessageBox.critical(
+                self, "Import Failed", f"Error reading file:\n{str(e)}"
+            )
 
     def restore_prompt_from_history(self, item):
         index = self.history_list.row(item)
@@ -590,7 +848,9 @@ class AIForgeUI(QWidget):
             self.prompt_input.setPlainText(self.history[index][0])
 
     def highlight_code_blocks(self, html_text):
-        code_block_pattern = re.compile(r'<pre><code(?: class="language-(\w+)")?>(.*?)</code></pre>', re.DOTALL)
+        code_block_pattern = re.compile(
+            r'<pre><code(?: class="language-(\w+)")?>(.*?)</code></pre>', re.DOTALL
+        )
 
         def replacer(match):
             lang = match.group(1) or "text"
@@ -599,9 +859,9 @@ class AIForgeUI(QWidget):
             # unescape HTML
             code = (
                 code.replace("&lt;", "<")
-                    .replace("&gt;", ">")
-                    .replace("&amp;", "&")
-                    .replace("&quot;", '"')
+                .replace("&gt;", ">")
+                .replace("&amp;", "&")
+                .replace("&quot;", '"')
             )
 
             try:
@@ -614,8 +874,6 @@ class AIForgeUI(QWidget):
             return f'<div class="highlight">{highlighted}</div>'
 
         return code_block_pattern.sub(replacer, html_text)
-    
-
 
 
 if __name__ == "__main__":
@@ -624,4 +882,3 @@ if __name__ == "__main__":
     window = AIForgeUI()
     window.show()
     sys.exit(app.exec())
-

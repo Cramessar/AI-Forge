@@ -23,7 +23,7 @@ class ModelLoader:
                 "max_tokens": 512
             },
             "performance": {
-                "backend": "auto",  # options: "cpu", "gpu", or "auto"
+                "backend": "auto",
                 "last_benchmark": {
                     "cpu": None,
                     "gpu": None
@@ -63,7 +63,7 @@ class ModelLoader:
         gpu_time = times.get("gpu")
 
         if cpu_time is None or gpu_time is None:
-            return "cpu"  # default to CPU if we can't decide
+            return "cpu"
 
         return "gpu" if gpu_time < cpu_time else "cpu"
 
@@ -100,6 +100,13 @@ class ModelLoader:
     def get_generation_settings(self):
         return self.config.get("generation", {})
 
+    def is_ollama_running(self):
+        try:
+            response = requests.get("http://localhost:11434")
+            return response.status_code == 200
+        except:
+            return False
+
     def generate_with_ollama_stream(self, prompt: str):
         model_name = self.config["default_model"].get("model_name", "mistral")
         settings = self.get_generation_settings()
@@ -124,6 +131,41 @@ class ModelLoader:
                     yield chunk.get("response", "")
                 except json.JSONDecodeError:
                     continue
+
+    def generate_single_response(self, prompt: str) -> str:
+        backend = self.config["default_model"]["type"]
+        if backend == "ollama":
+            chunks = []
+            for chunk in self.generate_with_ollama_stream(prompt):
+                chunks.append(chunk)
+            return ''.join(chunks)
+        return "[Only Ollama supported]"
+    
+    def generate_sync(self, prompt: str) -> str:
+        """
+        Synchronously generate a full response using the configured backend.
+        This is used for things like prompt chaining.
+        """
+        model_name = self.config["default_model"].get("model_name", "mistral")
+        settings = self.get_generation_settings()
+
+        try:
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": model_name,
+                    "prompt": prompt,
+                    "temperature": settings.get("temperature", 0.7),
+                    "stream": False
+                },
+                timeout=60
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("response", "")
+        except Exception as e:
+            return f"[Error in generate_sync: {str(e)}]"
+
 
     def list_ollama_models(self):
         try:
@@ -153,7 +195,8 @@ class ModelLoader:
                     timeout=30
                 )
                 results[device] = round(time.time() - start, 2)
-            except Exception:
+            except Exception as e:
+                print(f"[Benchmark error on {device.upper()}]: {e}")
                 results[device] = None
 
         self.config["performance"]["last_benchmark"] = results
