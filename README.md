@@ -175,3 +175,46 @@ Thanks for checking out AI Forge.
 Now go forth and generate something epic.
 
 — _Chris_
+
+
+
+## 🚀 V2 Improvements
+
+Version 2 of **AI Forge** comes loaded with next-gen features designed to give both power users and tinkerers a serious upgrade in control, flexibility, and performance:
+
+### 🔗 Prompt Chaining
+- Chain multiple prompt templates together.
+- Each response is automatically passed to the next prompt.
+- Mimics a manual conversation flow with automated precision.
+- Ideal for structured workflows (e.g. Q&A → summary → action plan).
+
+### 🧠 Hugging Face Transformers Integration
+- Added support for local Hugging Face models.
+- No API keys or internet required — fully offline execution.
+- Includes support for:
+  - `TinyLlama/TinyLlama-1.1B-Chat-v1.0`
+  - `microsoft/phi-2`
+- Easily extensible: just add to the `HF_MODEL_MAP` in `local_hf_runner.py`.
+
+### 💾 Model Selection Upgraded
+- Unified model dropdown (Ollama + Hugging Face models).
+- Seamlessly switches backend type and persists config updates.
+
+### 📚 Persistent Prompt Chaining UI
+- Chain selection and ordering now persists between sessions.
+- Drag-and-drop to reorder, check/uncheck to toggle chain links.
+
+### ⚙️ Dynamic Performance Benchmarking
+- Run CPU/GPU benchmarks to identify the fastest backend.
+- Auto-adjusts backend, temperature, and max token settings.
+- Saves and reuses best config.
+
+### 🖼️ Enhanced Output Rendering
+- Syntax-highlighted code blocks using Pygments and HTML.
+- Supports markdown with fenced code, breaks, and inline formatting.
+- All output scrolls and displays beautifully in a WebEngine view.
+
+---
+
+> Want to contribute a new model or template? Add it to the project and update the docs — we welcome upgrades from fellow Forge-smiths.
+ P.S the "we" is the voices in my head...just kidding its the feedback I get from my wife
