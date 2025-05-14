@@ -1,0 +1,7 @@
+{
+  "guidance_scale": 13,
+  "num_inference_steps": 62,
+  "model_id": "Freepik/F-Lite",
+  "width": 768,
+  "height": 768
+}

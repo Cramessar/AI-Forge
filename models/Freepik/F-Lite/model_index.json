@@ -1,0 +1,19 @@
+{
+  "_class_name": "FLitePipeline",
+  "_diffusers_version": "0.33.1",
+  "scheduler": {
+    "_class_name": "EulerDiscreteScheduler"
+  },
+  "tokenizer": {
+    "_class_name": "CLIPTokenizer"
+  },
+  "text_encoder": {
+    "_class_name": "CLIPTextModel"
+  },
+  "vae": {
+    "_class_name": "AutoencoderKL"
+  },
+  "unet": {
+    "_class_name": "UNet2DConditionModel"
+  }
+}

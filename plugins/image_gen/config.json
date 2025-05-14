@@ -1,0 +1,8 @@
+{
+  "name": "Image Generator",
+  "description": "Generates images using SDXL Base 1.0.",
+  "type": "image_gen",
+  "entry_point": "plugin.py",
+  "model_id": "stabilityai/stable-diffusion-xl-base-1.0",
+  "output_dir": "generated_images"
+}

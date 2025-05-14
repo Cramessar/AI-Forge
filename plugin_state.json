@@ -1,0 +1,7 @@
+{
+  "enabled_plugins": {
+    "Image Generation": false,
+    "Local Document Search": true,
+    "Sample Plugin": false
+  }
+}

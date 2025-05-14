@@ -1,0 +1,7 @@
+{
+    "name": "Sample Plugin",
+    "description": "Appends a debug footer to output to confirm plugin pipeline works.",
+    "type": "post_proc",
+    "entry_point": "plugin.py"
+  }
+  

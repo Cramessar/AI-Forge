@@ -1,31 +1,37 @@
-# Byte-compiled / optimized / DLL files
+# 🔧 Python bytecode & cache
 __pycache__/
 *.py[cod]
 *$py.class
 
-# Virtual environment
+# 📦 Virtual environments
 .venv/
+.venv_cuda/
 venv/
 env/
 ENV/
 
-# VSCode and JetBrains IDE configs
+# 🧰 IDE configurations
 .vscode/
 .idea/
 
-# macOS + Windows cruft
+# 🗑️ OS-specific clutter
 .DS_Store
 Thumbs.db
 
-# Python build artifacts
+# 🛠️ Python build artifacts
 build/
 dist/
 *.egg-info/
 
-# Logs or temp files
+# 📄 Logs, history, and temp files
 *.log
 .history.json
 history.db
 
-# Ollama models (if applicable)
+# 🧠 Ollama model cache (if applicable)
 ollama_model_cache/
+
+# 🧪 Pytest & coverage
+.pytest_cache/
+.coverage
+htmlcov/

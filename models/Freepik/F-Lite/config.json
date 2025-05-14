@@ -1,0 +1,12 @@
+{
+    "_class_name": "UNet2DConditionModel",
+    "_diffusers_version": "0.27.2",
+    "sample_size": 64,
+    "in_channels": 4,
+    "out_channels": 4,
+    "block_out_channels": [320, 640, 1280, 1280],
+    "layers_per_block": 2,
+    "down_block_types": ["CrossAttnDownBlock2D", "CrossAttnDownBlock2D", "CrossAttnDownBlock2D", "DownBlock2D"],
+    "up_block_types": ["UpBlock2D", "CrossAttnUpBlock2D", "CrossAttnUpBlock2D", "CrossAttnUpBlock2D"]
+  }
+  

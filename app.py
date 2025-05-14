@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QTabWidget,
     QListWidgetItem,
+    QCheckBox,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 import webbrowser
@@ -33,8 +34,10 @@ from db import init_db
 from hardware_profile import get_system_profile, get_tuned_generation_settings
 from prompt_tools import load_templates, apply_template, chain_prompts, update_template_selector_state, load_prompt_template, save_prompt_template, chain_prompts
 from local_hf_runner import HFRunner, HF_MODEL_MAP
-
-
+from core.plugin_loader import load_plugins
+from plugins.image_gen.settings_dialog import ImageGenSettingsDialog
+from core.utils.local_search_manager import LocalSearchManager
+from core.utils.file_importer import run_import_dialog
 
 
 
@@ -70,6 +73,8 @@ class GenerationThread(QThread):
         except Exception as e:
             self.result_ready.emit(f"[Error] {str(e)}")
             self.finished.emit(self.prompt)
+
+
 
 
 class SettingsDialog(QDialog):
@@ -246,27 +251,50 @@ class SettingsDialog(QDialog):
 class AIForgeUI(QWidget):
     def __init__(self):
         super().__init__()
+        print("👷‍♂️ AIForgeUI.__init__() starting...")
+
+        # Load plugins early
+        from core.plugin_loader import load_plugins
+        print("🔌 Calling load_plugins()...")
+        self.plugins = load_plugins()
+        print(f"🔌 Plugins loaded: {len(self.plugins)}")
+
+        # Start with all plugins disabled; user will toggle them in the sidebar
+        self.enabled_plugins = {plugin.get_name(): False for plugin in self.plugins}
+
+        # Local search manager and mode flags
+        self.local_search_manager = LocalSearchManager()
+        
+
+        # Window setup
         self.setWindowTitle("AI Forge")
         self.setWindowIcon(QIcon("Lulu-X.ico"))
         self.setMinimumSize(1000, 700)
+
+        # Model loader & HF runner
         self.model_loader = ModelLoader()
         self.model_loader.load_model()
         self.hf_runner = HFRunner()
-        self.backend_used = self.model_loader.config["performance"].get(
-            "backend", "cpu"
-        )
+        self.backend_used = self.model_loader.config["performance"].get("backend", "cpu")
+
+        # Tune generation settings based on hardware
         profile = get_system_profile()
         recommended = get_tuned_generation_settings(profile)
         self.model_loader.config.setdefault("generation", {})
-        self.model_loader.config["generation"]["temperature"] = recommended[
-            "temperature"
-        ]
+        self.model_loader.config["generation"]["temperature"] = recommended["temperature"]
         self.model_loader.config["generation"]["max_tokens"] = recommended["max_tokens"]
         self.model_loader.save_config()
+
+        # Conversation history and theme
         self.history = []
         self.ui_color = self.model_loader.config.get("ui_color", "#009EEB")
+
+        # Build the UI and apply theming
         self.init_ui()
         self.apply_theme_color()
+
+
+
 
     def init_ui(self):
         from local_hf_runner import HF_MODEL_MAP  # ensures HF models are accessible
@@ -301,6 +329,10 @@ class AIForgeUI(QWidget):
         self.settings_button = QPushButton("🛠️ Settings")
         self.settings_button.clicked.connect(self.open_settings)
         self.sidebar.addWidget(self.settings_button)
+        
+        self.image_settings_button = QPushButton("🖌️ Image Settings")
+        self.image_settings_button.clicked.connect(self.open_image_settings)
+        self.sidebar.addWidget(self.image_settings_button)
 
         self.save_button = QPushButton("🧱 Save Session")
         self.save_button.clicked.connect(self.save_session)
@@ -311,7 +343,11 @@ class AIForgeUI(QWidget):
         self.sidebar.addWidget(self.load_button)
 
         self.import_button = QPushButton("📥 Add Content")
-        self.import_button.clicked.connect(self.import_content)
+        self.import_button.clicked.connect(
+            lambda: run_import_dialog(self, self.local_search_manager)
+        )
+        self.sidebar.addWidget(self.import_button)
+
         self.sidebar.addWidget(self.import_button)
 
         self.sidebar.addSpacing(10)
@@ -401,13 +437,26 @@ class AIForgeUI(QWidget):
         self.clear_button = QPushButton("🧹 Clear")
         self.clear_button.clicked.connect(self.clear_output)
         button_row.addWidget(self.clear_button)
+
         self.copy_button = QPushButton("📋 Copy Output")
         self.copy_button.clicked.connect(self.copy_output)
         button_row.addWidget(self.copy_button)
+
         self.regenerate_button = QPushButton("🔁 Regenerate")
         self.regenerate_button.clicked.connect(self.regenerate_last)
         button_row.addWidget(self.regenerate_button)
+
+        self.search_files_button = QPushButton("🔍 Search Files")
+        self.search_files_button.clicked.connect(self.handle_search)
+        button_row.addWidget(self.search_files_button)
+
+        self.image_gen_button = QPushButton("🎨 Generate Image")
+        self.image_gen_button.clicked.connect(self.handle_image_gen)
+        button_row.addWidget(self.image_gen_button)
+
         button_row.addStretch()
+
+        
         self.model_display = QLabel()
         self.update_model_display(current)
         button_row.addWidget(self.model_display)
@@ -435,6 +484,10 @@ class AIForgeUI(QWidget):
             for i in range(self.chain_list.count())
         )
         self.template_selector.setEnabled(not any_checked)
+
+    def open_image_settings(self):
+        dialog = ImageGenSettingsDialog(self)
+        dialog.exec()
 
 
     def apply_theme_color(self):
@@ -513,7 +566,6 @@ class AIForgeUI(QWidget):
             self.model_loader.save_config()
             self.apply_theme_color()
 
-
     def save_prompt_as_template(self):
         from PyQt6.QtWidgets import QInputDialog
         from prompt_tools import save_prompt_template
@@ -570,60 +622,58 @@ class AIForgeUI(QWidget):
 
 
     def handle_generate(self):
-        prompt = self.prompt_input.toPlainText().strip()
+        # Basic LLM generation only — no local search or image
+        self.generate_button.setText("Generate")
+        self.prompt_input.setPlaceholderText("Enter your prompt here...")
 
+        prompt = self.prompt_input.toPlainText().strip()
         if not prompt:
             QMessageBox.warning(self, "Missing Prompt", "Please enter a prompt before generating.")
             return
 
-        # Handle chaining first — takes precedence over single template
-        chain_templates = []
-        for i in range(self.chain_list.count()):
-            item = self.chain_list.item(i)
-            if item.checkState() == Qt.CheckState.Checked:
-                chain_templates.append(item.text())
+        # ── Prompt‐Chaining / Template Mode ─────────────────────────────
+        chain_templates = [
+            self.chain_list.item(i).text()
+            for i in range(self.chain_list.count())
+            if self.chain_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
 
         if chain_templates:
             prompt = chain_prompts(chain_templates, prompt, self.model_loader)
         else:
-            selected_template = self.template_selector.currentText()
-            if selected_template != "None" and selected_template in self.templates:
-                prompt = apply_template(self.templates[selected_template], prompt)
+            selected = self.template_selector.currentText()
+            if selected != "None" and selected in self.templates:
+                prompt = apply_template(self.templates[selected], prompt)
 
+        # ── Model Dispatch ──────────────────────────────────────────────
         self.generate_button.setEnabled(False)
         self.output_box.repaint()
 
         dropdown_model = self.model_selector.currentText()
 
-        from local_hf_runner import HF_MODEL_MAP  # centralized mapping of HF models
-
         if dropdown_model in HF_MODEL_MAP:
-            # Use Hugging Face model
             self.model_loader.config["default_model"]["type"] = "huggingface"
             self.model_loader.config["default_model"]["model_name"] = HF_MODEL_MAP[dropdown_model]
             self.model_loader.save_config()
-
             self.hf_runner = HFRunner(HF_MODEL_MAP[dropdown_model])
             result = self.hf_runner.generate(prompt)
             self.display_result(prompt, result)
             return
 
-        # Otherwise, Ollama model
-        configured_model = self.model_loader.config["default_model"].get("model_name")
-        if dropdown_model != configured_model:
+        current_cfg = self.model_loader.config["default_model"].get("model_name")
+        if dropdown_model != current_cfg:
             self.model_loader.config["default_model"]["model_name"] = dropdown_model
             self.model_loader.config["default_model"]["type"] = "ollama"
             self.model_loader.save_config()
-            configured_model = dropdown_model
 
-        self.update_model_display(configured_model)
+        self.update_model_display(dropdown_model)
 
-        # Start generation thread (Ollama)
         self.generated_text = ""
         self.thread = GenerationThread(self.model_loader, prompt)
         self.thread.result_ready.connect(self.append_stream_chunk)
         self.thread.finished.connect(self.finish_stream)
         self.thread.start()
+
 
 
 
@@ -660,11 +710,30 @@ class AIForgeUI(QWidget):
         from pygments.formatters import HtmlFormatter
         from db import get_connection
 
+        plugin_input = {
+            "text": result,
+            "original_prompt": prompt  # ✅ Needed for keyword detection in plugins
+        }
+
+        # 🔌 Run plugin pipeline
+        for plugin in self.plugins:
+            name = plugin.get_name()
+            if self.enabled_plugins.get(name, True):
+                try:
+                    if plugin.plugin_type() == "post_proc":
+                        plugin_input = plugin.run(plugin_input)
+                    elif plugin.plugin_type() == "image_gen" and prompt.lower().startswith("image:"):
+                        plugin.run(plugin_input)
+                except Exception as e:
+                    print(f"[Plugin Error] {name}: {e}")
+
+        result = plugin_input.get("text", result)
+
+        # 📄 Convert to HTML
         raw_html = markdown2.markdown(
             result, extras=["fenced-code-blocks", "break-on-newline", "code-friendly"]
         )
 
-        # highlight code blocks
         highlighted = self.highlight_code_blocks(raw_html)
         block = f"""
         <div class="ai-output">
@@ -714,7 +783,6 @@ class AIForgeUI(QWidget):
         self.history.append((prompt, result))
         self.history_list.addItem(prompt[:40] + "...")
 
-        # SQLite DB
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -723,9 +791,8 @@ class AIForgeUI(QWidget):
             conn.commit()
 
         self.generate_button.setEnabled(True)
-        self.output_box.page().runJavaScript(
-            "window.scrollTo(0, document.body.scrollHeight);"
-        )
+        self.output_box.page().runJavaScript("window.scrollTo(0, document.body.scrollHeight);")
+
 
     def update_model_display(self, model_name):
         backend = self.model_loader.config["performance"].get("backend", "cpu")
@@ -805,43 +872,62 @@ class AIForgeUI(QWidget):
         except FileNotFoundError:
             pass  
 
-    def import_content(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Import Content",
-            "",
-            "Supported Files (*.txt *.md *.markdown *.pdf);;All Files (*)",
-        )
-        if not file_path:
+    def handle_search(self):
+        prompt = self.prompt_input.toPlainText().strip()
+        if not prompt:
+            QMessageBox.warning(self, "Missing Query", "Please enter something to search for.")
             return
 
+        print(f"[LocalSearch Triggered] Searching for: {prompt}")
+
         try:
-            if file_path.endswith((".txt", ".md", ".markdown")):
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-            elif file_path.endswith(".pdf"):
-                import fitz  # PyMuPDF
+            plugin = next(p for p in self.plugins if p.get_name() == "Local Document Search")
+        except StopIteration:
+            QMessageBox.critical(self, "Search Plugin Missing", "Local Document Search plugin not found.")
+            return
 
-                doc = fitz.open(file_path)
-                content = "\n\n".join(page.get_text() for page in doc)
-            else:
-                QMessageBox.warning(
-                    self,
-                    "Unsupported Format",
-                    "This file type is not currently supported.",
-                )
-                return
+        plugin_input = {"text": "", "original_prompt": prompt}
+        output = plugin.run(plugin_input)
+        result = output.get("text", "⚠️ No documents returned.")
 
-            existing = self.prompt_input.toPlainText()
-            self.prompt_input.setPlainText(existing + "\n\n" + content)
+        self.display_result(prompt, result)
 
-            QMessageBox.information(self, "Import Successful", f"Imported: {file_path}")
 
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Import Failed", f"Error reading file:\n{str(e)}"
-            )
+    def handle_image_gen(self):
+        prompt = self.prompt_input.toPlainText().strip()
+        if not prompt:
+            QMessageBox.warning(self, "Missing Prompt", "Please enter a description for your image.")
+            return
 
+        print(f"[ImageGeneration Triggered] Generating image for: {prompt}")
+
+        try:
+            plugin = next(p for p in self.plugins if p.plugin_type() == "image_gen")
+        except StopIteration:
+            QMessageBox.critical(self, "Image Plugin Missing", "Image Generation plugin not found.")
+            return
+
+        plugin_input = {"original_prompt": prompt}
+        result = plugin.run(plugin_input)
+
+        if "error" in result:
+            QMessageBox.critical(self, "Image Error", result["error"])
+            return
+
+        img_src = result.get("image_path") or result.get("url") or result.get("text")
+        if not img_src or not str(img_src).lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
+            QMessageBox.critical(self, "Image Error", "Plugin didn’t return a valid image path or URL.")
+            return
+
+        html = f'''
+        <html><body style="margin:0; background:#000;">
+            <img src="file:///{img_src}" style="width:100%;height:auto;"/>
+        </body></html>'''
+        self.output_box.setHtml(html)
+
+
+
+        
     def restore_prompt_from_history(self, item):
         index = self.history_list.row(item)
         if 0 <= index < len(self.history):
@@ -878,6 +964,7 @@ class AIForgeUI(QWidget):
 
 if __name__ == "__main__":
     init_db()
+    print("🚀 Creating AIForgeUI window...")
     app = QApplication(sys.argv)
     window = AIForgeUI()
     window.show()

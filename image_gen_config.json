@@ -1,0 +1,6 @@
+{
+  "guidance_scale": 20,
+  "num_inference_steps": 100,
+  "width": 1536,
+  "height": 1024
+}
